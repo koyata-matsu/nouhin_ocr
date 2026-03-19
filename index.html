@@ -20,15 +20,8 @@
   .logo-mark svg { width: 20px; height: 20px; fill: white; }
   .logo-text { font-size: 16px; font-weight: 700; }
   .logo-sub { font-size: 11px; color: var(--text2); margin-left: 4px; font-weight: 300; }
-  main { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+  main { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
   .info-tip { background: var(--accent-light); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 12px; color: var(--accent); margin-bottom: 20px; }
-
-  /* APIキー入力欄 */
-  .api-section { background: var(--surface); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 20px; border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
-  .api-section label { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--text2); }
-  .api-section input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-family: 'DM Mono', monospace; font-size: 13px; background: var(--bg); color: var(--text); outline: none; transition: border-color 0.2s; }
-  .api-section input:focus { border-color: var(--accent); }
-  .api-hint { font-size: 11px; color: var(--text3); white-space: nowrap; }
 
   .upload-card { background: var(--surface); border-radius: var(--radius); border: 2px dashed var(--border); padding: 44px 32px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; position: relative; }
   .upload-card:hover, .upload-card.drag-over { border-color: var(--accent); background: var(--accent-light); }
@@ -59,6 +52,8 @@
   .btn-primary:hover { background: var(--accent2); }
   .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
   .btn-secondary:hover { background: var(--border); }
+  .btn-yakka { background: #EEF6FF; color: #1A56A4; border: 1px solid #BFDBFE; }
+  .btn-yakka:hover { background: #DBEAFE; }
 
   .table-wrap { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -71,9 +66,19 @@
   td.amount-col { text-align: right; font-weight: 500; color: var(--accent); font-family: 'DM Mono', monospace; }
   td.mono { font-family: 'DM Mono', monospace; }
 
+  /* 薬価セル */
+  td.yakka-col { padding: 6px 10px; min-width: 160px; }
+  .yakka-cell { display: flex; align-items: center; gap: 6px; }
+  .yakka-input { width: 80px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-family: 'DM Mono', monospace; font-size: 12px; background: var(--bg); color: var(--text); outline: none; text-align: right; transition: border-color 0.2s; }
+  .yakka-input:focus { border-color: #1A56A4; }
+  .yakka-input.found { border-color: var(--accent2); background: var(--accent-light); }
+  .btn-lookup { padding: 4px 8px; border-radius: 6px; font-size: 11px; font-weight: 500; border: 1px solid #BFDBFE; background: #EEF6FF; color: #1A56A4; cursor: pointer; white-space: nowrap; transition: all 0.15s; font-family: inherit; }
+  .btn-lookup:hover { background: #DBEAFE; }
+  .btn-lookup:disabled { opacity: 0.5; cursor: not-allowed; }
+
   .error-box { background: #FEF0EF; border: 1px solid #F5C6C2; border-radius: 8px; padding: 12px 16px; color: var(--danger); font-size: 13px; margin-top: 16px; display: none; white-space: pre-wrap; }
   .error-box.visible { display: block; }
-  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; max-width: 320px; }
   .toast.show { opacity: 1; }
 </style>
 </head>
@@ -88,12 +93,6 @@
 
 <main>
   <div class="info-tip">📋 PDFをアップロード → 読み取り → 「コピー」→ スプレッドシートに Ctrl+V で貼り付け</div>
-
-  <div class="api-section">
-    <label>Gemini APIキー</label>
-    <input type="password" id="geminiKey" placeholder="APIキーをここに貼り付け（AIza...）" autocomplete="off">
-    <span class="api-hint">※触らないで！</span>
-  </div>
 
   <div class="upload-card" id="dropZone">
     <input type="file" id="fileInput" accept=".pdf,image/*" multiple>
@@ -119,6 +118,10 @@
         <div class="result-meta" id="resultMeta"></div>
       </div>
       <div class="btn-group">
+        <button class="btn btn-yakka" onclick="lookupAllYakka()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          全件薬価検索
+        </button>
         <button class="btn btn-secondary" onclick="downloadCSV()">CSVダウンロード</button>
         <button class="btn btn-primary" onclick="copyForSheets()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -136,16 +139,11 @@
 <script>
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
 
-// ★ ここにAPIキーを保存（ページを開いたとき自動でセット）
-const SAVED_API_KEY = 'AIzaSyDp0qoEzgBmb2danvRTI30EGqdwDHKg6K8';  // ← キーをここに貼り付けると起動時に自動入力されます
-
-window.addEventListener('load', () => {
-  if (SAVED_API_KEY) document.getElementById('geminiKey').value = SAVED_API_KEY;
-});
+const SAVED_API_KEY = 'AIzaSyDp0qoEzgBmb2danvRTI30EGqdwDHKg6K8';
 
 let parsedData = [];
-const COLS = ['ファイル名','業者名','納品日','伝票番号','品番','品名','数量','単位','単価','金額'];
-const KEYS = ['file','supplier','delivery_date','document_number','code','name','quantity','unit','unit_price','amount'];
+const COLS = ['ファイル名','業者名','納品日','伝票番号','品番','品名','数量','単位','単価','金額','薬価'];
+const KEYS = ['file','supplier','delivery_date','document_number','code','name','quantity','unit','unit_price','amount','yakka'];
 
 function toReiwa(dateStr) {
   if (!dateStr) return '';
@@ -173,8 +171,8 @@ function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
 
 async function handleFiles(files) {
   if (!files.length) return;
-  const apiKey = document.getElementById('geminiKey').value.trim();
-  if (!apiKey) { showError('APIキーを入力してください。'); return; }
+  const apiKey = SAVED_API_KEY;
+  if (!apiKey) { showError('APIキーが設定されていません。'); return; }
   showError(''); setProgress(true);
   document.getElementById('resultSection').classList.remove('visible');
   parsedData = [];
@@ -271,15 +269,99 @@ async function callGemini(apiKey, base64, mimeType, fileName) {
   return (parsed.items || []).map(item => ({
     file: fileName, supplier: parsed.supplier || '', delivery_date: parsed.delivery_date || '',
     document_number: parsed.document_number || '', code: item.code || '', name: item.name || '',
-    quantity: item.quantity || '', unit: item.unit || '', unit_price: item.unit_price || '', amount: item.amount || '',
+    quantity: item.quantity || '', unit: item.unit || '', unit_price: item.unit_price || '',
+    amount: item.amount || '', yakka: '',
   }));
+}
+
+// ヤクチエから薬価を検索
+async function lookupYakka(name, rowIndex) {
+  if (!name) return;
+  const btn = document.querySelector('[data-lookup-row="' + rowIndex + '"]');
+  const input = document.querySelector('[data-yakka-row="' + rowIndex + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '検索中...'; }
+  try {
+    // ヤクチエ検索URL（品名で検索）
+    const searchUrl = 'https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name);
+    const proxyUrl = 'https://corsproxy.io/?' + encodeURIComponent(searchUrl);
+    const res = await fetch(proxyUrl, { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const html = await res.text();
+    const price = extractYakka(html);
+    if (price !== null) {
+      parsedData[rowIndex].yakka = price;
+      if (input) { input.value = price; input.classList.add('found'); }
+      showToast('薬価を取得しました: ' + price + '円');
+    } else {
+      // 価格が見つからなければヤクチエを新タブで開く
+      showToast('薬価が自動取得できませんでした。ヤクチエで確認してください。');
+      window.open('https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name), '_blank');
+    }
+  } catch(e) {
+    if (e.name === 'TimeoutError') {
+      showToast('タイムアウト: ヤクチエを新タブで開きます。');
+    } else {
+      showToast('検索エラー: ' + e.message + '\nヤクチエを新タブで開きます。');
+    }
+    window.open('https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name), '_blank');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '検索'; }
+  }
+}
+
+// HTML から薬価を抽出
+function extractYakka(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+
+  // 薬価テキストパターンを探す（例: 薬価 12.30 円 や 薬価：12.30など）
+  const body = doc.body;
+  if (!body) return null;
+
+  // テキストノードを再帰的にスキャン
+  const walker = document.createTreeWalker(body, NodeFilter.SHOW_TEXT);
+  let node;
+  let prevText = '';
+  while ((node = walker.nextNode())) {
+    const t = node.textContent.trim();
+    // 「薬価」の直後や近くに数値があるケースを検出
+    if (/薬価/.test(prevText + t)) {
+      const combined = prevText + ' ' + t;
+      const m = combined.match(/薬価[^\d]*(\d[\d,]*\.?\d*)/);
+      if (m) return m[1].replace(/,/g, '');
+    }
+    if (t) prevText = t;
+  }
+
+  // 属性やinnerHTMLベースのフォールバック
+  const innerHTML = body.innerHTML;
+  const m = innerHTML.match(/薬価[^<\d]{0,20}(\d[\d,]*\.?\d*)/);
+  if (m) return m[1].replace(/,/g, '');
+
+  return null;
+}
+
+// 全件薬価検索
+async function lookupAllYakka() {
+  const names = parsedData.map((r, i) => ({ name: r.name, index: i })).filter(r => r.name);
+  if (!names.length) return;
+  for (const { name, index } of names) {
+    await lookupYakka(name, index);
+    await sleep(500); // リクエスト間隔
+  }
 }
 
 function showResults() {
   if (!parsedData.length) { showError('データを抽出できませんでした。'); return; }
   document.getElementById('tableHead').innerHTML = COLS.map(c => '<th>' + c + '</th>').join('');
-  document.getElementById('tableBody').innerHTML = parsedData.map(row =>
+  document.getElementById('tableBody').innerHTML = parsedData.map((row, rowIndex) =>
     '<tr>' + KEYS.map(k => {
+      if (k === 'yakka') {
+        const escapedName = (row['name'] || '').replace(/'/g, "\\'");
+        return '<td class="yakka-col"><div class="yakka-cell">' +
+          '<input type="text" class="yakka-input" data-yakka-row="' + rowIndex + '" value="' + (row.yakka || '') + '" placeholder="--" oninput="parsedData[' + rowIndex + '].yakka=this.value">' +
+          '<button class="btn-lookup" data-lookup-row="' + rowIndex + '" onclick="lookupYakka(\'' + escapedName + '\',' + rowIndex + ')">検索</button>' +
+          '</div></td>';
+      }
       const cls = k === 'name' ? 'name-col' : (k === 'amount' || k === 'unit_price') ? 'amount-col' : 'mono';
       const val = row[k] || '';
       let disp = val;
@@ -315,7 +397,7 @@ function setProgress(show) { document.getElementById('progressArea').classList.t
 function updateProgress(pct, label) { document.getElementById('progressFill').style.width = pct + '%'; document.getElementById('progressPct').textContent = Math.round(pct) + '%'; if (label) document.getElementById('progressLabel').textContent = label; }
 function setProgressStatus(html) { document.getElementById('progressStatus').innerHTML = html; }
 function showError(msg) { const el = document.getElementById('errorBox'); el.textContent = msg; el.classList.toggle('visible', !!msg); }
-function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3500); }
 </script>
 </body>
 </html>
