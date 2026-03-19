@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>納品書リーダー</title>
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+  :root {
+    --bg: #F7F5F0; --surface: #FFFFFF; --surface2: #F0EDE6;
+    --accent: #1A6B4A; --accent2: #2E9D6E; --accent-light: #E8F5EF;
+    --text: #1C1C1A; --text2: #6B6860; --text3: #9B9890;
+    --border: #DDD9D0; --danger: #C0392B; --radius: 12px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Noto Sans JP', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; font-size: 14px; line-height: 1.6; }
+  header { background: var(--surface); border-bottom: 1px solid var(--border); padding: 16px 32px; display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 100; }
+  .logo-mark { width: 36px; height: 36px; background: var(--accent); border-radius: 10px; display: flex; align-items: center; justify-content: center; }
+  .logo-mark svg { width: 20px; height: 20px; fill: white; }
+  .logo-text { font-size: 16px; font-weight: 700; }
+  .logo-sub { font-size: 11px; color: var(--text2); margin-left: 4px; font-weight: 300; }
+  main { max-width: 900px; margin: 0 auto; padding: 32px 24px; }
+  .info-tip { background: var(--accent-light); border-left: 3px solid var(--accent); border-radius: 0 8px 8px 0; padding: 10px 14px; font-size: 12px; color: var(--accent); margin-bottom: 20px; }
+
+  /* APIキー入力欄 */
+  .api-section { background: var(--surface); border-radius: var(--radius); padding: 16px 20px; margin-bottom: 20px; border: 1px solid var(--border); display: flex; align-items: center; gap: 12px; }
+  .api-section label { font-size: 13px; font-weight: 500; white-space: nowrap; color: var(--text2); }
+  .api-section input { flex: 1; border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; font-family: 'DM Mono', monospace; font-size: 13px; background: var(--bg); color: var(--text); outline: none; transition: border-color 0.2s; }
+  .api-section input:focus { border-color: var(--accent); }
+  .api-hint { font-size: 11px; color: var(--text3); white-space: nowrap; }
+
+  .upload-card { background: var(--surface); border-radius: var(--radius); border: 2px dashed var(--border); padding: 44px 32px; text-align: center; cursor: pointer; transition: border-color 0.2s, background 0.2s; position: relative; }
+  .upload-card:hover, .upload-card.drag-over { border-color: var(--accent); background: var(--accent-light); }
+  .upload-card input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+  .upload-icon { width: 52px; height: 52px; background: var(--accent-light); border-radius: 14px; display: flex; align-items: center; justify-content: center; margin: 0 auto 14px; }
+  .upload-icon svg { width: 26px; height: 26px; stroke: var(--accent); fill: none; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .upload-title { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .upload-sub { color: var(--text2); font-size: 13px; }
+  .upload-badge { display: inline-block; background: var(--accent-light); color: var(--accent); border-radius: 20px; padding: 3px 10px; font-size: 12px; font-weight: 500; margin-top: 10px; }
+
+  .progress-area { background: var(--surface); border-radius: var(--radius); padding: 24px 28px; margin-top: 16px; border: 1px solid var(--border); display: none; }
+  .progress-area.visible { display: block; }
+  .progress-label { font-size: 13px; color: var(--text2); margin-bottom: 10px; display: flex; justify-content: space-between; }
+  .progress-bar-bg { background: var(--surface2); border-radius: 100px; height: 6px; overflow: hidden; }
+  .progress-bar-fill { height: 100%; background: var(--accent); border-radius: 100px; width: 0%; transition: width 0.4s ease; }
+  .progress-status { margin-top: 10px; font-size: 13px; color: var(--text2); }
+  .spinner { display: inline-block; width: 13px; height: 13px; border: 2px solid var(--border); border-top-color: var(--accent); border-radius: 50%; animation: spin 0.8s linear infinite; vertical-align: middle; margin-right: 6px; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .result-section { margin-top: 20px; display: none; }
+  .result-section.visible { display: block; }
+  .result-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; flex-wrap: wrap; gap: 10px; }
+  .result-title { font-size: 15px; font-weight: 700; }
+  .result-meta { font-size: 12px; color: var(--text2); }
+  .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn { padding: 8px 16px; border-radius: 8px; font-size: 13px; font-weight: 500; border: none; cursor: pointer; transition: all 0.15s; font-family: inherit; display: flex; align-items: center; gap: 6px; }
+  .btn-primary { background: var(--accent); color: white; }
+  .btn-primary:hover { background: var(--accent2); }
+  .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
+  .btn-secondary:hover { background: var(--border); }
+
+  .table-wrap { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  thead tr { background: var(--surface2); }
+  th { padding: 10px 14px; text-align: left; font-weight: 500; color: var(--text2); font-size: 12px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  td { padding: 10px 14px; border-bottom: 1px solid var(--border); color: var(--text); font-size: 12px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--accent-light); }
+  td.name-col { font-family: 'Noto Sans JP', sans-serif; font-size: 13px; }
+  td.amount-col { text-align: right; font-weight: 500; color: var(--accent); font-family: 'DM Mono', monospace; }
+  td.mono { font-family: 'DM Mono', monospace; }
+
+  .error-box { background: #FEF0EF; border: 1px solid #F5C6C2; border-radius: 8px; padding: 12px 16px; color: var(--danger); font-size: 13px; margin-top: 16px; display: none; white-space: pre-wrap; }
+  .error-box.visible { display: block; }
+  .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; }
+  .toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo-mark">
+    <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="8" y1="13" x2="16" y2="13"/><line x1="8" y1="17" x2="16" y2="17"/><line x1="8" y1="9" x2="10" y2="9"/></svg>
+  </div>
+  <span class="logo-text">納品書リーダー</span>
+  <span class="logo-sub">PDF → スプレッドシート用コピー</span>
+</header>
+
+<main>
+  <div class="info-tip">📋 PDFをアップロード → 読み取り → 「コピー」→ スプレッドシートに Ctrl+V で貼り付け</div>
+
+  <div class="api-section">
+    <label>Gemini APIキー</label>
+    <input type="password" id="geminiKey" placeholder="APIキーをここに貼り付け（AIza...）" autocomplete="off">
+    <span class="api-hint">※ページを閉じると消えます</span>
+  </div>
+
+  <div class="upload-card" id="dropZone">
+    <input type="file" id="fileInput" accept=".pdf,image/*" multiple>
+    <div class="upload-icon">
+      <svg viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+    </div>
+    <div class="upload-title">納品書PDFをここにドロップ</div>
+    <div class="upload-sub">またはクリックしてファイルを選択（複数可）</div>
+    <span class="upload-badge">PDF / JPG / PNG 対応</span>
+  </div>
+
+  <div class="progress-area" id="progressArea">
+    <div class="progress-label"><span id="progressLabel">処理中...</span><span id="progressPct">0%</span></div>
+    <div class="progress-bar-bg"><div class="progress-bar-fill" id="progressFill"></div></div>
+    <div class="progress-status" id="progressStatus"><span class="spinner"></span>読み取っています...</div>
+  </div>
+  <div class="error-box" id="errorBox"></div>
+
+  <div class="result-section" id="resultSection">
+    <div class="result-header">
+      <div>
+        <div class="result-title">読み取り結果</div>
+        <div class="result-meta" id="resultMeta"></div>
+      </div>
+      <div class="btn-group">
+        <button class="btn btn-secondary" onclick="downloadCSV()">CSVダウンロード</button>
+        <button class="btn btn-primary" onclick="copyForSheets()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+          スプレッドシート用にコピー
+        </button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table><thead><tr id="tableHead"></tr></thead><tbody id="tableBody"></tbody></table>
+    </div>
+  </div>
+</main>
+<div class="toast" id="toast"></div>
+
+<script>
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+
+// ★ ここにAPIキーを保存（ページを開いたとき自動でセット）
+const SAVED_API_KEY = 'AIzaSyDp0qoEzgBmb2danvRTI30EGqdwDHKg6K8';  // ← キーをここに貼り付けると起動時に自動入力されます
+
+window.addEventListener('load', () => {
+  if (SAVED_API_KEY) document.getElementById('geminiKey').value = SAVED_API_KEY;
+});
+
+let parsedData = [];
+const COLS = ['ファイル名','業者名','納品日','伝票番号','品番','品名','数量','単位','単価','金額'];
+const KEYS = ['file','supplier','delivery_date','document_number','code','name','quantity','unit','unit_price','amount'];
+
+function toReiwa(dateStr) {
+  if (!dateStr) return '';
+  const m = dateStr.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!m) return dateStr;
+  const y = parseInt(m[1]), mo = parseInt(m[2]), d = parseInt(m[3]);
+  if (y >= 2019) {
+    if (y === 2019 && mo < 5) return '平成' + (y - 1988) + '年' + mo + '月' + d + '日';
+    const ry = y - 2018;
+    return '令和' + (ry === 1 ? '元' : ry) + '年' + mo + '月' + d + '日';
+  } else if (y >= 1989) {
+    return '平成' + (y - 1988) + '年' + mo + '月' + d + '日';
+  }
+  return dateStr;
+}
+
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+dropZone.addEventListener('dragover', e => { e.preventDefault(); dropZone.classList.add('drag-over'); });
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => { e.preventDefault(); dropZone.classList.remove('drag-over'); handleFiles(e.dataTransfer.files); });
+fileInput.addEventListener('change', e => handleFiles(e.target.files));
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function handleFiles(files) {
+  if (!files.length) return;
+  const apiKey = document.getElementById('geminiKey').value.trim();
+  if (!apiKey) { showError('APIキーを入力してください。'); return; }
+  showError(''); setProgress(true);
+  document.getElementById('resultSection').classList.remove('visible');
+  parsedData = [];
+  try {
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      updateProgress(10 + (i / files.length) * 30, file.name + ' を読み込み中...');
+      setProgressStatus('📄 ' + file.name + ' を読み込み中...');
+      let base64, mimeType;
+      if (file.type === 'application/pdf') {
+        base64 = await pdfToImageBase64(file); mimeType = 'image/jpeg';
+      } else {
+        base64 = await fileToBase64(file); mimeType = file.type;
+      }
+      updateProgress(40 + (i / files.length) * 50, 'AIが解析中...');
+      setProgressStatus('<span class="spinner"></span>Gemini AIが解析しています...');
+      const result = await callGeminiWithRetry(apiKey, base64, mimeType, file.name);
+      parsedData = parsedData.concat(result);
+      if (i < files.length - 1) {
+        setProgressStatus('⏳ 次のファイルまで少し待っています...');
+        await sleep(3000);
+      }
+    }
+    updateProgress(100, '完了！'); setProgressStatus('✅ 読み取り完了');
+    setTimeout(() => setProgress(false), 800); showResults();
+  } catch(e) { setProgress(false); showError('エラー: ' + e.message); }
+}
+
+async function pdfToImageBase64(file) {
+  const arrayBuffer = await file.arrayBuffer();
+  const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+  const page = await pdf.getPage(1);
+  const viewport = page.getViewport({ scale: 2.0 });
+  const canvas = document.createElement('canvas');
+  canvas.width = viewport.width; canvas.height = viewport.height;
+  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+  return canvas.toDataURL('image/jpeg', 0.9).split(',')[1];
+}
+
+async function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = e => resolve(e.target.result.split(',')[1]);
+    reader.onerror = reject; reader.readAsDataURL(file);
+  });
+}
+
+async function callGeminiWithRetry(apiKey, base64, mimeType, fileName, maxRetry = 3) {
+  for (let attempt = 1; attempt <= maxRetry; attempt++) {
+    try { return await callGemini(apiKey, base64, mimeType, fileName); }
+    catch(e) {
+      if (e.message.startsWith('RATE_LIMITED') && attempt < maxRetry) {
+        const wait = attempt * 10000;
+        setProgressStatus('⏳ ' + (wait/1000) + '秒後に再試行（' + attempt + '/' + maxRetry + '回目）');
+        await sleep(wait);
+      } else throw e;
+    }
+  }
+}
+
+async function callGemini(apiKey, base64, mimeType, fileName) {
+  const prompt = `納品書・請求書のデータ抽出AIです。画像から情報を抽出しJSON形式のみで返してください。前置き不要。
+日付はYYYY-MM-DD形式で返してください。
+形式:{"supplier":"業者名","delivery_date":"YYYY-MM-DD","document_number":"伝票番号","items":[{"code":"品番","name":"品名","quantity":"数量","unit":"単位","unit_price":"単価数値のみ","amount":"金額数値のみ"}],"subtotal":"小計","tax":"消費税","total":"合計"}`;
+
+  const res = await fetch(
+    'https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=' + apiKey,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ contents: [{ parts: [
+        { text: prompt },
+        { inline_data: { mime_type: mimeType, data: base64 } }
+      ]}]})
+    }
+  );
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const detail = err.error?.message || JSON.stringify(err);
+    if (res.status === 400) throw new Error('APIキーが無効です。');
+    if (res.status === 429) throw new Error('RATE_LIMITED: ' + detail);
+    throw new Error('HTTP' + res.status + ': ' + detail);
+  }
+  const data = await res.json();
+  const text = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const clean = text.replace(/```json|```/g, '').trim();
+  let parsed;
+  try { parsed = JSON.parse(clean); }
+  catch(e) {
+    const match = clean.match(/\{[\s\S]*\}/);
+    if (match) { try { parsed = JSON.parse(match[0]); } catch(e2) { throw new Error('データ解析失敗'); } }
+    else throw new Error('データ解析失敗');
+  }
+  return (parsed.items || []).map(item => ({
+    file: fileName, supplier: parsed.supplier || '', delivery_date: parsed.delivery_date || '',
+    document_number: parsed.document_number || '', code: item.code || '', name: item.name || '',
+    quantity: item.quantity || '', unit: item.unit || '', unit_price: item.unit_price || '', amount: item.amount || '',
+  }));
+}
+
+function showResults() {
+  if (!parsedData.length) { showError('データを抽出できませんでした。'); return; }
+  document.getElementById('tableHead').innerHTML = COLS.map(c => '<th>' + c + '</th>').join('');
+  document.getElementById('tableBody').innerHTML = parsedData.map(row =>
+    '<tr>' + KEYS.map(k => {
+      const cls = k === 'name' ? 'name-col' : (k === 'amount' || k === 'unit_price') ? 'amount-col' : 'mono';
+      const val = row[k] || '';
+      let disp = val;
+      if (k === 'delivery_date') disp = toReiwa(val);
+      else if ((k === 'amount' || k === 'unit_price') && val) disp = Number(val).toLocaleString();
+      return '<td class="' + cls + '">' + disp + '</td>';
+    }).join('') + '</tr>'
+  ).join('');
+  document.getElementById('resultMeta').textContent = parsedData.length + ' 件のデータを抽出';
+  document.getElementById('resultSection').classList.add('visible');
+}
+
+function downloadCSV() {
+  if (!parsedData.length) return;
+  const rows = [COLS.join(','), ...parsedData.map(r => KEYS.map(k => {
+    const val = k === 'delivery_date' ? toReiwa(r[k]) : (r[k] || '');
+    return '"' + val.toString().replace(/"/g, '""') + '"';
+  }).join(','))];
+  const blob = new Blob(['\uFEFF' + rows.join('\n')], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = '納品書データ_' + new Date().toISOString().slice(0,10) + '.csv'; a.click();
+}
+
+function copyForSheets() {
+  if (!parsedData.length) return;
+  const rows = [COLS.join('\t'), ...parsedData.map(r => KEYS.map(k => {
+    return k === 'delivery_date' ? toReiwa(r[k]) : (r[k] || '');
+  }).join('\t'))];
+  navigator.clipboard.writeText(rows.join('\n')).then(() => showToast('📋 コピーしました！スプレッドシートで Ctrl+V で貼り付けてください'));
+}
+
+function setProgress(show) { document.getElementById('progressArea').classList.toggle('visible', show); if (!show) document.getElementById('progressFill').style.width = '0%'; }
+function updateProgress(pct, label) { document.getElementById('progressFill').style.width = pct + '%'; document.getElementById('progressPct').textContent = Math.round(pct) + '%'; if (label) document.getElementById('progressLabel').textContent = label; }
+function setProgressStatus(html) { document.getElementById('progressStatus').innerHTML = html; }
+function showError(msg) { const el = document.getElementById('errorBox'); el.textContent = msg; el.classList.toggle('visible', !!msg); }
+function showToast(msg) { const t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(() => t.classList.remove('show'), 3000); }
+</script>
+</body>
+</html>
