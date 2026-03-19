@@ -52,6 +52,19 @@
   .btn-primary:hover { background: var(--accent2); }
   .btn-secondary { background: var(--surface2); color: var(--text); border: 1px solid var(--border); }
   .btn-secondary:hover { background: var(--border); }
+  .btn-search { background: #EEF6FF; color: #1A56A4; border: 1px solid #BFDBFE; }
+  .btn-search:hover { background: #DBEAFE; }
+
+  /* 薬価セル */
+  td.yakka-col { padding: 6px 10px; }
+  .yakka-cell { display: flex; align-items: center; gap: 5px; }
+  .yakka-input { width: 80px; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-family: 'DM Mono', monospace; font-size: 12px; background: var(--bg); color: var(--text); outline: none; text-align: right; transition: border-color 0.2s; }
+  .yakka-input:focus { border-color: #1A56A4; }
+  .yakka-input.found { border-color: var(--accent2); background: var(--accent-light); }
+  .btn-lookup { padding: 3px 7px; border-radius: 5px; font-size: 11px; border: 1px solid #BFDBFE; background: #EEF6FF; color: #1A56A4; cursor: pointer; white-space: nowrap; transition: all 0.15s; font-family: inherit; }
+  .btn-lookup:hover { background: #DBEAFE; }
+  .btn-lookup:disabled { opacity: 0.5; cursor: not-allowed; }
+
   .table-wrap { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); overflow: hidden; overflow-x: auto; }
   table { width: 100%; border-collapse: collapse; font-size: 13px; }
   thead tr { background: var(--surface2); }
@@ -105,6 +118,10 @@
         <div class="result-meta" id="resultMeta"></div>
       </div>
       <div class="btn-group">
+        <button class="btn btn-search" onclick="lookupAllYakka()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          全件薬価検索
+        </button>
         <button class="btn btn-secondary" onclick="downloadCSV()">CSVダウンロード</button>
         <button class="btn btn-primary" onclick="copyForSheets()">
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
@@ -125,7 +142,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dis
 const SAVED_API_KEY = 'AIzaSyDp0qoEzgBmb2danvRTI30EGqdwDHKg6K8';
 
 let parsedData = [];
-const COLS = ['ファイル名','業者名','納品日','伝票番号','品番','品名','数量','単位','単価','金額'];
+const COLS = ['ファイル名','業者名','納品日','伝票番号','品番','品名','数量','単位','薬価','金額'];
 const KEYS = ['file','supplier','delivery_date','document_number','code','name','quantity','unit','unit_price','amount'];
 
 function toReiwa(dateStr) {
@@ -257,16 +274,67 @@ async function callGemini(apiKey, base64, mimeType, fileName) {
   }));
 }
 
+// ヤクチエから薬価を検索して unit_price を更新
+async function lookupYakka(name, rowIndex) {
+  if (!name) return;
+  const btn = document.querySelector('[data-lookup-row="' + rowIndex + '"]');
+  const input = document.querySelector('[data-yakka-row="' + rowIndex + '"]');
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  try {
+    const searchUrl = 'https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name);
+    const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(searchUrl), { signal: AbortSignal.timeout(15000) });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const html = await res.text();
+    const price = extractYakka(html);
+    if (price !== null) {
+      parsedData[rowIndex].unit_price = price;
+      if (input) { input.value = price; input.classList.add('found'); }
+      showToast('薬価: ' + price + '円');
+    } else {
+      showToast('ヤクチエで見つかりませんでした。新タブで確認してください。');
+      window.open(searchUrl, '_blank');
+    }
+  } catch(e) {
+    showToast('検索できませんでした。新タブで開きます。');
+    window.open('https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name), '_blank');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '検索'; }
+  }
+}
+
+function extractYakka(html) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const body = doc.body;
+  if (!body) return null;
+  const innerHTML = body.innerHTML;
+  const m = innerHTML.match(/薬価[^<\d]{0,20}(\d[\d,]*\.?\d*)/);
+  if (m) return m[1].replace(/,/g, '');
+  return null;
+}
+
+async function lookupAllYakka() {
+  for (let i = 0; i < parsedData.length; i++) {
+    if (parsedData[i].name) { await lookupYakka(parsedData[i].name, i); await sleep(500); }
+  }
+}
+
 function showResults() {
   if (!parsedData.length) { showError('データを抽出できませんでした。'); return; }
   document.getElementById('tableHead').innerHTML = COLS.map(c => '<th>' + c + '</th>').join('');
-  document.getElementById('tableBody').innerHTML = parsedData.map(row =>
+  document.getElementById('tableBody').innerHTML = parsedData.map((row, rowIndex) =>
     '<tr>' + KEYS.map(k => {
-      const cls = k === 'name' ? 'name-col' : (k === 'amount' || k === 'unit_price') ? 'amount-col' : 'mono';
+      if (k === 'unit_price') {
+        const escapedName = (row['name'] || '').replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        return '<td class="yakka-col"><div class="yakka-cell">' +
+          '<input type="text" class="yakka-input" data-yakka-row="' + rowIndex + '" value="' + (row.unit_price || '') + '" placeholder="--" oninput="parsedData[' + rowIndex + '].unit_price=this.value">' +
+          '<button class="btn-lookup" data-lookup-row="' + rowIndex + '" onclick="lookupYakka(\'' + escapedName + '\',' + rowIndex + ')">検索</button>' +
+          '</div></td>';
+      }
+      const cls = k === 'name' ? 'name-col' : k === 'amount' ? 'amount-col' : 'mono';
       const val = row[k] || '';
       let disp = val;
       if (k === 'delivery_date') disp = toReiwa(val);
-      else if ((k === 'amount' || k === 'unit_price') && val) disp = Number(val).toLocaleString();
+      else if (k === 'amount' && val) disp = Number(val).toLocaleString();
       return '<td class="' + cls + '">' + disp + '</td>';
     }).join('') + '</tr>'
   ).join('');
