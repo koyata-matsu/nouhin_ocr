@@ -6,6 +6,7 @@
 <title>納品書リーダー</title>
 <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <style>
   :root {
     --bg: #F7F5F0; --surface: #FFFFFF; --surface2: #F0EDE6;
@@ -76,6 +77,16 @@
   td.amount-col { text-align: right; font-weight: 500; color: var(--accent); font-family: 'DM Mono', monospace; }
   td.mono { font-family: 'DM Mono', monospace; }
 
+  /* 薬価DBバー */
+  .yakka-db-bar { background: var(--surface); border-radius: var(--radius); border: 1px solid var(--border); padding: 12px 16px; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .yakka-db-label { font-size: 13px; font-weight: 500; white-space: nowrap; }
+  .yakka-db-status { font-size: 12px; color: var(--text3); flex: 1; min-width: 0; }
+  .yakka-db-status.loaded { color: var(--accent); }
+  .yakka-file-label { padding: 5px 12px; border-radius: 7px; font-size: 12px; font-weight: 500; border: 1px solid var(--border); background: var(--surface2); color: var(--text); cursor: pointer; white-space: nowrap; transition: background 0.15s; }
+  .yakka-file-label:hover { background: var(--border); }
+  .yakka-db-link { font-size: 12px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+  .yakka-db-link:hover { text-decoration: underline; }
+
   .error-box { background: #FEF0EF; border: 1px solid #F5C6C2; border-radius: 8px; padding: 12px 16px; color: var(--danger); font-size: 13px; margin-top: 16px; display: none; white-space: pre-wrap; }
   .error-box.visible { display: block; }
   .toast { position: fixed; bottom: 24px; right: 24px; background: var(--text); color: white; padding: 10px 18px; border-radius: 8px; font-size: 13px; opacity: 0; transition: opacity 0.3s; pointer-events: none; z-index: 999; max-width: 320px; }
@@ -93,6 +104,16 @@
 
 <main>
   <div class="info-tip">📋 PDFをアップロード → 読み取り → 「コピー」→ スプレッドシートに Ctrl+V で貼り付け</div>
+
+  <div class="yakka-db-bar">
+    <span class="yakka-db-label">💊 薬価DB</span>
+    <span class="yakka-db-status" id="yakkaStatus">未読み込み — 薬価検索を使うには厚労省Excelを読み込んでください</span>
+    <label class="yakka-file-label">
+      Excelを選択
+      <input type="file" accept=".xlsx" style="display:none" onchange="handleYakkaFile(this.files[0])">
+    </label>
+    <a href="https://www.mhlw.go.jp/topics/2025/04/tp20250401-01.html" target="_blank" class="yakka-db-link">厚労省からDL ↗</a>
+  </div>
 
   <div class="upload-card" id="dropZone">
     <input type="file" id="fileInput" accept=".pdf,image/*" multiple>
@@ -274,48 +295,96 @@ async function callGemini(apiKey, base64, mimeType, fileName) {
   }));
 }
 
-// ヤクチエから薬価を検索して unit_price を更新
-async function lookupYakka(name, rowIndex) {
-  if (!name) return;
-  const btn = document.querySelector('[data-lookup-row="' + rowIndex + '"]');
-  const input = document.querySelector('[data-yakka-row="' + rowIndex + '"]');
-  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+// ===== 薬価DB（厚労省Excelから構築） =====
+let yakkaDB = new Map(); // 品名 → 薬価
+
+async function handleYakkaFile(file) {
+  const statusEl = document.getElementById('yakkaStatus');
+  statusEl.className = 'yakka-db-status';
+  statusEl.textContent = '読み込み中...';
   try {
-    const searchUrl = 'https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name);
-    const res = await fetch('https://corsproxy.io/?' + encodeURIComponent(searchUrl), { signal: AbortSignal.timeout(15000) });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const html = await res.text();
-    const price = extractYakka(html);
-    if (price !== null) {
-      parsedData[rowIndex].unit_price = price;
-      if (input) { input.value = price; input.classList.add('found'); }
-      showToast('薬価: ' + price + '円');
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    yakkaDB.clear();
+    for (const sheetName of wb.SheetNames) {
+      const ws = wb.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '' });
+      let nameCol = -1, priceCol = -1, headerRow = -1;
+      for (let r = 0; r < Math.min(6, data.length); r++) {
+        const row = data[r];
+        for (let c = 0; c < row.length; c++) {
+          const cell = String(row[c]).trim();
+          if (cell === '品名') { nameCol = c; headerRow = r; }
+          if (cell === '薬価') priceCol = c;
+        }
+        if (nameCol >= 0 && priceCol >= 0) break;
+      }
+      if (nameCol < 0 || priceCol < 0) continue;
+      for (let r = headerRow + 1; r < data.length; r++) {
+        const row = data[r];
+        const name = String(row[nameCol] || '').trim();
+        const price = row[priceCol];
+        if (name && price !== '' && price !== undefined) yakkaDB.set(name, String(price));
+      }
+    }
+    if (yakkaDB.size === 0) {
+      statusEl.textContent = '❌ 読み込み失敗（「品名」「薬価」列が見つかりません）';
     } else {
-      showToast('ヤクチエで見つかりませんでした。新タブで確認してください。');
-      window.open(searchUrl, '_blank');
+      statusEl.className = 'yakka-db-status loaded';
+      statusEl.textContent = '✅ ' + yakkaDB.size.toLocaleString() + ' 件読み込み済み（' + file.name + '）';
     }
   } catch(e) {
-    showToast('検索できませんでした。新タブで開きます。');
-    window.open('https://yakuchie.com/medicines?keyword=' + encodeURIComponent(name), '_blank');
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '検索'; }
+    statusEl.textContent = '❌ エラー: ' + e.message;
   }
 }
 
-function extractYakka(html) {
-  const doc = new DOMParser().parseFromString(html, 'text/html');
-  const body = doc.body;
-  if (!body) return null;
-  const innerHTML = body.innerHTML;
-  const m = innerHTML.match(/薬価[^<\d]{0,20}(\d[\d,]*\.?\d*)/);
-  if (m) return m[1].replace(/,/g, '');
+function searchYakka(name) {
+  if (!name || !yakkaDB.size) return null;
+  const n = name.trim();
+  // 1. 完全一致
+  if (yakkaDB.has(n)) return yakkaDB.get(n);
+  // 2. 「メーカー名」部分を除いて一致（例: "アスピリン錠「日医工」"→"アスピリン錠"）
+  const noSuffix = n.replace(/[「『【（(].*$/, '').trim();
+  if (noSuffix && yakkaDB.has(noSuffix)) return yakkaDB.get(noSuffix);
+  // 3. 前方一致（DB側がより詳細な場合）
+  for (const [key, price] of yakkaDB) {
+    if (key.startsWith(noSuffix || n)) return price;
+  }
+  // 4. 部分一致
+  for (const [key, price] of yakkaDB) {
+    if (key.includes(n) || n.includes(key.replace(/[「『【（(].*$/, '').trim())) return price;
+  }
   return null;
 }
 
-async function lookupAllYakka() {
-  for (let i = 0; i < parsedData.length; i++) {
-    if (parsedData[i].name) { await lookupYakka(parsedData[i].name, i); await sleep(500); }
+function lookupYakka(name, rowIndex) {
+  if (!yakkaDB.size) { showToast('先に薬価DBを読み込んでください'); return; }
+  const input = document.querySelector('[data-yakka-row="' + rowIndex + '"]');
+  const price = searchYakka(name);
+  if (price !== null) {
+    parsedData[rowIndex].unit_price = price;
+    if (input) { input.value = price; input.classList.add('found'); }
+    showToast('薬価: ' + price + '円');
+  } else {
+    showToast('「' + name + '」は見つかりませんでした');
   }
+}
+
+function lookupAllYakka() {
+  if (!yakkaDB.size) { showToast('先に薬価DBを読み込んでください'); return; }
+  let found = 0, notFound = 0;
+  for (let i = 0; i < parsedData.length; i++) {
+    const name = parsedData[i].name;
+    if (!name) continue;
+    const price = searchYakka(name);
+    if (price !== null) {
+      parsedData[i].unit_price = price;
+      const input = document.querySelector('[data-yakka-row="' + i + '"]');
+      if (input) { input.value = price; input.classList.add('found'); }
+      found++;
+    } else { notFound++; }
+  }
+  showToast('完了: ' + found + '件取得、' + notFound + '件未取得');
 }
 
 function showResults() {
